@@ -84,9 +84,11 @@ async function discoverPhotos() {
 
 // ── DOM refs ──────────────────────────────────────────────────
 const canvas = document.getElementById('glcanvas');
+const header = document.querySelector('header');
 const photoSelect = document.getElementById('photoSelect');
 const vrButtonContainer = document.getElementById('vrButtonContainer');
 const loadStatus = document.getElementById('loadStatus');
+const fullscreenButton = document.getElementById('fullscreenButton');
 const hint = document.getElementById('hint');
 
 // ── Renderer ──────────────────────────────────────────────────
@@ -106,7 +108,10 @@ const INITIAL_FOV = 75;
 const MIN_FOV = 20;
 const MAX_FOV = 90;
 const WHEEL_ZOOM_SPEED = 0.05;
+const FULLSCREEN_UI_HIDE_DELAY = 1800;
+const FULLSCREEN_UI_REVEAL_ZONE = 72;
 const camera = new THREE.PerspectiveCamera(INITIAL_FOV, canvas.clientWidth / canvas.clientHeight, 0.1, 1100);
+const fullscreenRoot = document.documentElement;
 
 // ── Photo sphere ──────────────────────────────────────────────
 // Scale X by -1 to flip winding order so the texture renders on the
@@ -149,6 +154,7 @@ let prevX = 0;
 let prevY = 0;
 let pinchStartDistance = 0;
 let pinchStartFov = camera.fov;
+let fullscreenUiHideTimeout = 0;
 const activePointers = new Map();
 
 function clamp(value, min, max) {
@@ -195,6 +201,151 @@ function applyRotation() {
   camera.rotation.x = pitch;
 }
 
+function getFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function supportsFullscreen() {
+  return Boolean(
+    document.fullscreenEnabled
+    || document.webkitFullscreenEnabled
+    || fullscreenRoot.requestFullscreen
+    || fullscreenRoot.webkitRequestFullscreen
+  );
+}
+
+async function requestFullscreen() {
+  if (fullscreenRoot.requestFullscreen) {
+    await fullscreenRoot.requestFullscreen();
+    return;
+  }
+
+  if (fullscreenRoot.webkitRequestFullscreen) {
+    await Promise.resolve(fullscreenRoot.webkitRequestFullscreen());
+  }
+}
+
+async function exitFullscreen() {
+  if (document.exitFullscreen) {
+    await document.exitFullscreen();
+    return;
+  }
+
+  if (document.webkitExitFullscreen) {
+    await Promise.resolve(document.webkitExitFullscreen());
+  }
+}
+
+function updateFullscreenButton() {
+  if (!fullscreenButton) return;
+
+  const isFullscreen = Boolean(getFullscreenElement());
+  fullscreenButton.textContent = isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+  fullscreenButton.ariaPressed = isFullscreen ? 'true' : 'false';
+  fullscreenButton.disabled = renderer.xr.isPresenting;
+}
+
+function clearFullscreenUiHideTimeout() {
+  if (!fullscreenUiHideTimeout) return;
+  window.clearTimeout(fullscreenUiHideTimeout);
+  fullscreenUiHideTimeout = 0;
+}
+
+function isFullscreenBrowserMode() {
+  return Boolean(getFullscreenElement()) && !renderer.xr.isPresenting;
+}
+
+function showFullscreenUi() {
+  if (!header) return;
+  header.classList.remove('hidden-in-fullscreen');
+}
+
+function hideFullscreenUi() {
+  if (!header || !isFullscreenBrowserMode()) return;
+  header.classList.add('hidden-in-fullscreen');
+}
+
+function scheduleFullscreenUiHide() {
+  clearFullscreenUiHideTimeout();
+
+  if (!isFullscreenBrowserMode()) {
+    showFullscreenUi();
+    return;
+  }
+
+  fullscreenUiHideTimeout = window.setTimeout(() => {
+    fullscreenUiHideTimeout = 0;
+    hideFullscreenUi();
+  }, FULLSCREEN_UI_HIDE_DELAY);
+}
+
+function syncFullscreenUiState() {
+  const fullscreenActive = isFullscreenBrowserMode();
+  document.body.classList.toggle('fullscreen-active', fullscreenActive);
+
+  if (!fullscreenActive) {
+    clearFullscreenUiHideTimeout();
+    showFullscreenUi();
+    return;
+  }
+
+  showFullscreenUi();
+  scheduleFullscreenUiHide();
+}
+
+async function toggleFullscreen() {
+  if (renderer.xr.isPresenting) return;
+
+  hideHint();
+
+  try {
+    if (getFullscreenElement()) {
+      await exitFullscreen();
+      return;
+    }
+
+    await requestFullscreen();
+  } catch (e) {
+    console.error('Failed to toggle fullscreen:', e);
+  }
+}
+
+function initFullscreen() {
+  if (!fullscreenButton || !supportsFullscreen()) return;
+
+  fullscreenButton.hidden = false;
+  fullscreenButton.addEventListener('click', toggleFullscreen);
+  updateFullscreenButton();
+
+  const handleFullscreenChange = () => {
+    updateFullscreenButton();
+    syncFullscreenUiState();
+    onResize();
+  };
+
+  document.addEventListener('fullscreenchange', handleFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+  document.addEventListener('pointermove', (e) => {
+    if (!isFullscreenBrowserMode()) return;
+    if (e.clientY > FULLSCREEN_UI_REVEAL_ZONE && !header?.matches(':hover')) return;
+    showFullscreenUi();
+    scheduleFullscreenUiHide();
+  });
+
+  if (header) {
+    header.addEventListener('pointerenter', () => {
+      if (!isFullscreenBrowserMode()) return;
+      showFullscreenUi();
+      clearFullscreenUiHideTimeout();
+    });
+
+    header.addEventListener('pointerleave', () => {
+      scheduleFullscreenUiHide();
+    });
+  }
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   if (renderer.xr.isPresenting) return;
   activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -233,8 +384,8 @@ canvas.addEventListener('pointermove', (e) => {
   const dy = e.clientY - prevY;
   prevX = e.clientX;
   prevY = e.clientY;
-  yaw   -= dx * 0.003;
-  pitch -= dy * 0.003;
+  yaw   += dx * 0.003;
+  pitch += dy * 0.003;
   pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
   applyRotation();
 });
@@ -301,6 +452,8 @@ async function toggleVR() {
       renderer.xr.setSession(null);
       vrButton.textContent = 'Enter VR';
       vrButton.classList.remove('vr-button-active');
+      updateFullscreenButton();
+      syncFullscreenUiState();
       onResize();
     });
 
@@ -308,6 +461,8 @@ async function toggleVR() {
     xrSession = session;
     vrButton.textContent = 'Exit VR';
     vrButton.classList.add('vr-button-active');
+    updateFullscreenButton();
+    syncFullscreenUiState();
     hideHint();
   } catch (e) {
     console.error('Failed to start VR session:', e);
@@ -326,6 +481,7 @@ let photos = [];
 
 async function init() {
   onResize();
+  initFullscreen();
   initXR();
 
   photos = await discoverPhotos();

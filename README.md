@@ -51,6 +51,8 @@ configuration.
 | Touch + drag | Look around (mobile) |
 | Scroll wheel | Zoom in/out |
 | Pinch | Zoom in/out (mobile) |
+| Fullscreen button | Enter/exit fullscreen |
+| Esc | Exit fullscreen (when in fullscreen) |
 | Enter VR button | Start immersive VR session (requires WebXR-capable browser/headset) |
 
 ## Structure

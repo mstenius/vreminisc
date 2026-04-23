@@ -23,6 +23,20 @@ header {
   flex-wrap: wrap;
   flex-shrink: 0;
   z-index: 10;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+body.fullscreen-active header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+body.fullscreen-active header.hidden-in-fullscreen {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
 }
 
 header h1 {
@@ -59,6 +73,25 @@ header h1 {
   font-size: 12px;
   color: #888;
   font-style: italic;
+}
+
+.toolbar-button {
+  background: #222;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toolbar-button:hover {
+  border-color: #888;
+}
+
+.toolbar-button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 main {
