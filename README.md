@@ -75,6 +75,8 @@ media/textures/               — equirectangular photos
 
 - Some browsers do not cope well with large textures, in particular on mobile. This usually results in a white screen.
 
+- Panoramic photos tend to be large. So be patient when loading.
+
 ## License
 
 MIT
