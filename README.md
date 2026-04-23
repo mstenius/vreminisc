@@ -18,6 +18,8 @@ python3 -m http.server
 
 Or with your own static HTTP server of choice.
 
+Note however that HTTPS is needed for mition-look on the phone, or for WebXR VR browsing.
+
 ## Adding photos
 
 Drop any equirectangular image (JPEG, PNG, WebP, AVIF) into `media/textures/`, then add it to `media/textures/photos.json` with a `title`. It will appear in the photo selector on next page load.
@@ -49,6 +51,7 @@ configuration.
 |-------|--------|
 | Click + drag | Look around |
 | Touch + drag | Look around (mobile) |
+| Motion Look button | Use device motion to look around (supported mobile browsers) |
 | Scroll wheel | Zoom in/out |
 | Pinch | Zoom in/out (mobile) |
 | Fullscreen button | Enter/exit fullscreen |
@@ -72,6 +75,8 @@ media/textures/               — equirectangular photos
 ## Caveats
 
 - WebXR in a VR browser (such as the one in a Quest) usually requires HTTPS. Serving over HTTP usually fails to load at all in such cases.
+
+- Motion Look on iOS Safari requires HTTPS and a permission grant from a user tap before device rotation can control the camera.
 
 - Some browsers do not cope well with large textures, in particular on mobile. This usually results in a white screen.
 

@@ -12,6 +12,9 @@ const IMAGE_RE = /\.(jpe?g|png|webp|avif|gif)$/i;
 const TEXTURES_DIR = 'media/textures/';
 const PHOTOS_MANIFEST = `${TEXTURES_DIR}photos.json`;
 const texturesBaseUrl = new URL(TEXTURES_DIR, window.location.href);
+const IS_SAFARI = /^((?!chrome|chromium|crios|edg|opr|fxios|android).)*safari/i.test(navigator.userAgent);
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 function humanizePhotoName(filename) {
   return decodeURIComponent(filename)
@@ -88,6 +91,7 @@ const header = document.querySelector('header');
 const photoSelect = document.getElementById('photoSelect');
 const vrButtonContainer = document.getElementById('vrButtonContainer');
 const loadStatus = document.getElementById('loadStatus');
+const motionButton = document.getElementById('motionButton');
 const fullscreenButton = document.getElementById('fullscreenButton');
 const hint = document.getElementById('hint');
 
@@ -110,8 +114,12 @@ const MAX_FOV = 90;
 const WHEEL_ZOOM_SPEED = 0.05;
 const FULLSCREEN_UI_HIDE_DELAY = 1800;
 const FULLSCREEN_UI_REVEAL_ZONE = 72;
+const STATUS_MESSAGE_DURATION = 2800;
+const MAX_COMPASS_ACCURACY_DEGREES = 45;
 const camera = new THREE.PerspectiveCamera(INITIAL_FOV, canvas.clientWidth / canvas.clientHeight, 0.1, 1100);
 const fullscreenRoot = document.documentElement;
+const MOTION_BUTTON_LABEL = 'Motion Look';
+const MOTION_BUTTON_ACTIVE_LABEL = 'Stop Motion';
 
 // ── Photo sphere ──────────────────────────────────────────────
 // Scale X by -1 to flip winding order so the texture renders on the
@@ -155,15 +163,178 @@ let prevY = 0;
 let pinchStartDistance = 0;
 let pinchStartFov = camera.fov;
 let fullscreenUiHideTimeout = 0;
+let statusMessageTimeout = 0;
+let motionLookActive = false;
+let lastMotionSample = null;
 const activePointers = new Map();
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function normalizeAngle(angle) {
+  return THREE.MathUtils.euclideanModulo(angle + Math.PI, Math.PI * 2) - Math.PI;
+}
+
 function setCameraFov(nextFov) {
   camera.fov = clamp(nextFov, MIN_FOV, MAX_FOV);
   camera.updateProjectionMatrix();
+}
+
+function setStatusMessage(message, duration = STATUS_MESSAGE_DURATION) {
+  if (!loadStatus) return;
+
+  if (statusMessageTimeout) {
+    window.clearTimeout(statusMessageTimeout);
+    statusMessageTimeout = 0;
+  }
+
+  loadStatus.textContent = message;
+
+  if (duration <= 0) return;
+
+  statusMessageTimeout = window.setTimeout(() => {
+    statusMessageTimeout = 0;
+    if (loadStatus.textContent === message) {
+      loadStatus.textContent = '';
+    }
+  }, duration);
+}
+
+function supportsMotionLookUi() {
+  return 'DeviceOrientationEvent' in window
+    && (navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches);
+}
+
+function shouldShowMotionButton() {
+  return supportsMotionLookUi() || (IS_SAFARI && IS_IOS);
+}
+
+function updateMotionButton() {
+  if (!motionButton) return;
+
+  motionButton.textContent = motionLookActive ? MOTION_BUTTON_ACTIVE_LABEL : MOTION_BUTTON_LABEL;
+  motionButton.ariaPressed = motionLookActive ? 'true' : 'false';
+  motionButton.classList.toggle('toolbar-button-active', motionLookActive);
+  motionButton.disabled = renderer.xr.isPresenting;
+}
+
+function disableMotionLook(statusMessage = '') {
+  if (!motionLookActive) return;
+
+  motionLookActive = false;
+  updateMotionButton();
+  applyRotation();
+
+  if (statusMessage) {
+    setStatusMessage(statusMessage);
+  }
+}
+
+function applyMotionLook(nextYaw, nextPitch) {
+  yaw = normalizeAngle(nextYaw);
+  pitch = clamp(nextPitch, -Math.PI / 2, Math.PI / 2);
+  applyRotation();
+}
+
+function getMotionAlphaRadians(event) {
+  const compassHeading = event.webkitCompassHeading;
+  const compassAccuracy = event.webkitCompassAccuracy;
+  const hasUsableCompassHeading = typeof compassHeading === 'number'
+    && !Number.isNaN(compassHeading)
+    && (typeof compassAccuracy !== 'number'
+      || Number.isNaN(compassAccuracy)
+      || compassAccuracy <= MAX_COMPASS_ACCURACY_DEGREES);
+
+  if (hasUsableCompassHeading) {
+    return THREE.MathUtils.degToRad(360 - compassHeading);
+  }
+
+  if (event.alpha == null) return null;
+  return THREE.MathUtils.degToRad(event.alpha);
+}
+
+function getMotionPitchRadians(event) {
+  if (event.beta == null) return null;
+  return THREE.MathUtils.degToRad(event.beta - 90);
+}
+
+function handleDeviceOrientation(event) {
+  const alpha = getMotionAlphaRadians(event);
+  const nextPitch = getMotionPitchRadians(event);
+  if (alpha == null || nextPitch == null) return;
+
+  lastMotionSample = {
+    yaw: alpha,
+    pitch: nextPitch,
+  };
+
+  if (!motionLookActive || renderer.xr.isPresenting) return;
+
+  applyMotionLook(lastMotionSample.yaw, lastMotionSample.pitch);
+}
+
+async function requestMotionPermission() {
+  if (!supportsMotionLookUi()) return false;
+
+  const requestPermission = DeviceOrientationEvent.requestPermission;
+  if (typeof requestPermission !== 'function') return true;
+
+  try {
+    return (await requestPermission.call(DeviceOrientationEvent)) === 'granted';
+  } catch (e) {
+    console.error('Failed to request device orientation permission:', e);
+    return false;
+  }
+}
+
+async function toggleMotionLook() {
+  if (renderer.xr.isPresenting) return;
+
+  if (motionLookActive) {
+    disableMotionLook('Motion look disabled');
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    setStatusMessage('Motion look requires HTTPS on mobile browsers', 3600);
+    return;
+  }
+
+  if (!supportsMotionLookUi()) {
+    setStatusMessage(
+      IS_SAFARI && IS_IOS
+        ? 'Motion sensors are unavailable in this Safari context'
+        : 'Motion sensors are not available on this device'
+    );
+    return;
+  }
+
+  const permissionGranted = await requestMotionPermission();
+  if (!permissionGranted) {
+    setStatusMessage('Motion permission was denied', 3200);
+    return;
+  }
+
+  motionLookActive = true;
+  updateMotionButton();
+
+  if (lastMotionSample) {
+    applyMotionLook(lastMotionSample.yaw, lastMotionSample.pitch);
+  }
+
+  setStatusMessage('Move the device to look around');
+  hideHint();
+}
+
+function initMotionLook() {
+  if (!motionButton || !shouldShowMotionButton()) return;
+
+  motionButton.hidden = false;
+  motionButton.addEventListener('click', toggleMotionLook);
+  updateMotionButton();
+
+  window.addEventListener('deviceorientation', handleDeviceOrientation, true);
 }
 
 function getPinchDistance() {
@@ -296,6 +467,16 @@ function syncFullscreenUiState() {
 async function toggleFullscreen() {
   if (renderer.xr.isPresenting) return;
 
+  if (!supportsFullscreen()) {
+    setStatusMessage(
+      IS_SAFARI && IS_IOS
+        ? 'Fullscreen is limited in iPhone Safari'
+        : 'Fullscreen is not supported in this browser',
+      3600
+    );
+    return;
+  }
+
   hideHint();
 
   try {
@@ -378,6 +559,8 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
 
+  if (motionLookActive) return;
+
   if (primaryPointerId !== e.pointerId) return;
 
   const dx = e.clientX - prevX;
@@ -442,6 +625,8 @@ async function toggleVR() {
     return;
   }
 
+  disableMotionLook();
+
   try {
     const session = await navigator.xr.requestSession('immersive-vr', {
       optionalFeatures: ['local-floor', 'bounded-floor'],
@@ -452,6 +637,7 @@ async function toggleVR() {
       renderer.xr.setSession(null);
       vrButton.textContent = 'Enter VR';
       vrButton.classList.remove('vr-button-active');
+      updateMotionButton();
       updateFullscreenButton();
       syncFullscreenUiState();
       onResize();
@@ -461,6 +647,7 @@ async function toggleVR() {
     xrSession = session;
     vrButton.textContent = 'Exit VR';
     vrButton.classList.add('vr-button-active');
+    updateMotionButton();
     updateFullscreenButton();
     syncFullscreenUiState();
     hideHint();
@@ -482,6 +669,7 @@ let photos = [];
 async function init() {
   onResize();
   initFullscreen();
+  initMotionLook();
   initXR();
 
   photos = await discoverPhotos();
