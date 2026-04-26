@@ -18,7 +18,7 @@ python3 -m http.server
 
 Or with your own static HTTP server of choice.
 
-Note however that HTTPS is needed for mition-look on the phone, or for WebXR VR browsing.
+Note however that HTTPS is needed for motion-look on the phone and for WebXR VR browsing.
 
 ## Adding photos
 
