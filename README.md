@@ -8,6 +8,8 @@ Serve it statically and open in a browser on your PC, mobile or VR helmet.
 
 Use it to step inside your 360° memories. Indulge in the reminiscing of past moments.
 
+For a live demo try: https://mstenius.github.io/vreminisc/
+
 ## Running
 
 ```sh
