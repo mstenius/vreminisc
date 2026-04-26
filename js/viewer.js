@@ -9,12 +9,64 @@ import * as THREE from 'three';
 // Prefer a static manifest so photo discovery is independent of the HTTP server.
 // Fall back to HTML directory listings when available for convenience.
 const IMAGE_RE = /\.(jpe?g|png|webp|avif|gif)$/i;
-const TEXTURES_DIR = 'media/textures/';
-const PHOTOS_MANIFEST = `${TEXTURES_DIR}photos.json`;
-const texturesBaseUrl = new URL(TEXTURES_DIR, window.location.href);
+const APP_CONFIG_PATH = 'app.config.json';
+const DEFAULT_TEXTURE_MEDIA_PATHS = ['media/textures/'];
+const DEFAULT_APP_CONFIG = Object.freeze({
+  pageTitle: document.title,
+  textureMediaPaths: DEFAULT_TEXTURE_MEDIA_PATHS,
+});
 const IS_SAFARI = /^((?!chrome|chromium|crios|edg|opr|fxios|android).)*safari/i.test(navigator.userAgent);
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
   || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function normalizeTextureMediaPath(path) {
+  if (typeof path !== 'string') return '';
+
+  const trimmedPath = path.trim();
+  if (!trimmedPath) return '';
+  return trimmedPath.endsWith('/') ? trimmedPath : `${trimmedPath}/`;
+}
+
+function normalizeTextureMediaPaths(paths) {
+  if (!Array.isArray(paths)) return DEFAULT_TEXTURE_MEDIA_PATHS;
+
+  const normalizedPaths = [...new Set(paths.map(normalizeTextureMediaPath).filter(Boolean))];
+  return normalizedPaths.length > 0 ? normalizedPaths : DEFAULT_TEXTURE_MEDIA_PATHS;
+}
+
+function normalizeAppConfig(config) {
+  return {
+    pageTitle: typeof config?.pageTitle === 'string' && config.pageTitle.trim()
+      ? config.pageTitle.trim()
+      : DEFAULT_APP_CONFIG.pageTitle,
+    textureMediaPaths: normalizeTextureMediaPaths(config?.textureMediaPaths),
+  };
+}
+
+async function loadAppConfig() {
+  try {
+    const res = await fetch(APP_CONFIG_PATH, { cache: 'no-store' });
+    if (!res.ok) return DEFAULT_APP_CONFIG;
+
+    const config = await res.json().catch(() => null);
+    return normalizeAppConfig(config);
+  } catch (e) {
+    console.warn('Failed to load app config:', e);
+    return DEFAULT_APP_CONFIG;
+  }
+}
+
+function applyAppConfig(config) {
+  document.title = config.pageTitle;
+}
+
+function getMediaBaseUrl(textureMediaPath) {
+  return new URL(textureMediaPath, window.location.href);
+}
+
+function getPhotosManifestUrl(textureMediaPath) {
+  return new URL('photos.json', getMediaBaseUrl(textureMediaPath)).href;
+}
 
 function humanizePhotoName(filename) {
   return decodeURIComponent(filename)
@@ -22,10 +74,10 @@ function humanizePhotoName(filename) {
     .replace(/[-_]/g, ' ');
 }
 
-function toPhoto(entry, title = '') {
+function toPhoto(textureMediaPath, entry, title = '') {
   if (typeof entry !== 'string' || !IMAGE_RE.test(entry)) return null;
 
-  const url = new URL(entry, texturesBaseUrl);
+  const url = new URL(entry, getMediaBaseUrl(textureMediaPath));
   const filename = url.pathname.split('/').pop();
   if (!filename) return null;
 
@@ -35,9 +87,9 @@ function toPhoto(entry, title = '') {
   };
 }
 
-function normalizeManifestEntry(entry) {
+function normalizeManifestEntry(textureMediaPath, entry) {
   if (typeof entry === 'string') {
-    return toPhoto(entry);
+    return toPhoto(textureMediaPath, entry);
   }
 
   if (!entry || typeof entry !== 'object') return null;
@@ -52,37 +104,52 @@ function normalizeManifestEntry(entry) {
     : typeof entry.name === 'string'
       ? entry.name.trim()
       : '';
-  return toPhoto(file, title);
+  return toPhoto(textureMediaPath, file, title);
 }
 
-async function discoverPhotosFromManifest() {
-  const res = await fetch(PHOTOS_MANIFEST, { cache: 'no-store' });
+async function discoverPhotosFromManifest(textureMediaPath) {
+  const res = await fetch(getPhotosManifestUrl(textureMediaPath), { cache: 'no-store' });
   if (!res.ok) return [];
 
   const manifest = await res.json().catch(() => null);
   if (!Array.isArray(manifest)) return [];
 
   return manifest
-    .map(normalizeManifestEntry)
+    .map((entry) => normalizeManifestEntry(textureMediaPath, entry))
     .filter(Boolean);
 }
 
-async function discoverPhotosFromDirectoryListing() {
-  const res = await fetch(TEXTURES_DIR);
+async function discoverPhotosFromDirectoryListing(textureMediaPath) {
+  const res = await fetch(textureMediaPath);
   if (!res.ok) return [];
 
   const html = await res.text();
   const doc = new DOMParser().parseFromString(html, 'text/html');
   return Array.from(doc.querySelectorAll('a[href]'))
     .map((a) => a.getAttribute('href'))
-    .map((href) => href ? toPhoto(href) : null)
+    .map((href) => href ? toPhoto(textureMediaPath, href) : null)
     .filter(Boolean);
 }
 
-async function discoverPhotos() {
-  const manifestPhotos = await discoverPhotosFromManifest();
+async function discoverPhotosInPath(textureMediaPath) {
+  const manifestPhotos = await discoverPhotosFromManifest(textureMediaPath);
   if (manifestPhotos.length > 0) return manifestPhotos;
-  return discoverPhotosFromDirectoryListing();
+  return discoverPhotosFromDirectoryListing(textureMediaPath);
+}
+
+function dedupePhotos(photos) {
+  const seenUrls = new Set();
+
+  return photos.filter((photo) => {
+    if (seenUrls.has(photo.url)) return false;
+    seenUrls.add(photo.url);
+    return true;
+  });
+}
+
+async function discoverPhotos(textureMediaPaths) {
+  const photoLists = await Promise.all(textureMediaPaths.map(discoverPhotosInPath));
+  return dedupePhotos(photoLists.flat());
 }
 
 // ── DOM refs ──────────────────────────────────────────────────
@@ -667,15 +734,18 @@ renderer.setAnimationLoop(() => {
 let photos = [];
 
 async function init() {
+  const appConfig = await loadAppConfig();
+  applyAppConfig(appConfig);
+
   onResize();
   initFullscreen();
   initMotionLook();
   initXR();
 
-  photos = await discoverPhotos();
+  photos = await discoverPhotos(appConfig.textureMediaPaths);
 
   if (photos.length === 0) {
-    loadStatus.textContent = 'No images found in media/textures/';
+    loadStatus.textContent = 'No images found in configured texture media paths';
     return;
   }
 

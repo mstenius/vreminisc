@@ -22,6 +22,21 @@ Or with your own static HTTP server of choice.
 
 Note however that HTTPS is needed for motion-look on the phone and for WebXR VR browsing.
 
+## Configuration
+
+Basic site settings live in `app.config.json`.
+
+```json
+{
+  "pageTitle": "VReminisc — 360° photo viewer",
+  "textureMediaPaths": [
+    "media/textures/"
+  ]
+}
+```
+
+`pageTitle` controls the browser tab title. `textureMediaPaths` lets you provide one or more media folders to search for `photos.json` manifests or directory listings.
+
 ## Adding photos
 
 Drop any equirectangular image (JPEG, PNG, WebP, AVIF) into `media/textures/`, then add it to `media/textures/photos.json` with a `title`. It will appear in the photo selector on next page load.
