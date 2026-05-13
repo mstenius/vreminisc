@@ -58,6 +58,7 @@ async function loadAppConfig() {
 
 function applyAppConfig(config) {
   document.title = config.pageTitle;
+  headerTitle.textContent = config.pageTitle;
 }
 
 function getMediaBaseUrl(textureMediaPath) {
@@ -161,6 +162,7 @@ const loadStatus = document.getElementById('loadStatus');
 const motionButton = document.getElementById('motionButton');
 const fullscreenButton = document.getElementById('fullscreenButton');
 const hint = document.getElementById('hint');
+const headerTitle = document.getElementById('headerTitle');
 
 // ── Renderer ──────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
