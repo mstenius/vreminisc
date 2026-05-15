@@ -202,6 +202,25 @@ scene.add(sphere);
 
 const texLoader = new THREE.TextureLoader();
 
+function photoFilename(photo) {
+  return photo.url.split('/').pop();
+}
+
+function setPhotoUrlParam(photo) {
+  const params = new URLSearchParams(location.search);
+  params.set('photo', photoFilename(photo));
+  history.replaceState(null, '', `?${params}`);
+}
+
+function selectPhoto(index) {
+  const photo = photos[index];
+  if (!photo) return;
+  photoSelect.value = index;
+  loadPhoto(photo);
+  setPhotoUrlParam(photo);
+  drawVRMenu();
+}
+
 function loadPhoto({ name, url }) {
   loadStatus.textContent = `Loading ${name}…`;
 
@@ -924,11 +943,7 @@ function activateVRMenuItem(id) {
     drawVRMenu();
   } else if (id.startsWith('photo:')) {
     const idx = Number(id.split(':')[1]);
-    if (!Number.isNaN(idx) && idx < photos.length) {
-      photoSelect.value = idx;
-      loadPhoto(photos[idx]);
-      drawVRMenu();
-    }
+    if (!Number.isNaN(idx) && idx < photos.length) selectPhoto(idx);
   }
 }
 
@@ -1134,12 +1149,17 @@ async function init() {
   });
 
   photoSelect.addEventListener('change', () => {
-    loadPhoto(photos[Number(photoSelect.value)]);
+    selectPhoto(Number(photoSelect.value));
     hideHint();
   });
 
+  const paramFilename = new URLSearchParams(location.search).get('photo');
+  const initialIndex = paramFilename
+    ? Math.max(0, photos.findIndex(p => photoFilename(p) === paramFilename))
+    : 0;
+
   createVRMenu();
-  loadPhoto(photos[0]);
+  selectPhoto(initialIndex);
 }
 
 init();
