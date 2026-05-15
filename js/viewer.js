@@ -688,6 +688,32 @@ function hideHint() {
   setTimeout(() => { hint.remove(); }, 600);
 }
 
+// ── Arrow-key panning ─────────────────────────────────────────
+const KEY_PAN_SPEED = 0.022; // radians per frame at 60 fps
+const pressedKeys = new Set();
+
+window.addEventListener('keydown', (e) => {
+  const tag = document.activeElement?.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'button') return;
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+    e.preventDefault();
+    pressedKeys.add(e.key);
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  pressedKeys.delete(e.key);
+});
+
+function updateKeyboardLook() {
+  if (renderer.xr.isPresenting || motionLookActive || pressedKeys.size === 0) return;
+  if (pressedKeys.has('ArrowLeft'))  yaw += KEY_PAN_SPEED;
+  if (pressedKeys.has('ArrowRight')) yaw -= KEY_PAN_SPEED;
+  if (pressedKeys.has('ArrowUp'))    pitch = Math.max(-Math.PI / 2, pitch + KEY_PAN_SPEED);
+  if (pressedKeys.has('ArrowDown'))  pitch = Math.min(Math.PI / 2, pitch - KEY_PAN_SPEED);
+  applyRotation();
+}
+
 // ── VR Menu ───────────────────────────────────────────────────
 const VR_MENU_CANVAS_W = 600;
 const VR_MENU_CANVAS_H = 560;
@@ -1118,6 +1144,7 @@ async function toggleVR() {
 // setAnimationLoop is XR-compatible: Three.js switches to XR frame
 // delivery automatically when a session is active.
 renderer.setAnimationLoop(() => {
+  updateKeyboardLook();
   updateVRMenu();
   renderer.render(scene, camera);
 });
