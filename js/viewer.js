@@ -588,6 +588,10 @@ function initFullscreen() {
     updateFullscreenButton();
     syncFullscreenUiState();
     onResize();
+    const tag = document.activeElement?.tagName.toLowerCase();
+    if (tag === 'button' || tag === 'input' || tag === 'select') {
+      document.activeElement.blur();
+    }
   };
 
   document.addEventListener('fullscreenchange', handleFullscreenChange);
