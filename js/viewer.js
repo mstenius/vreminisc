@@ -29,7 +29,17 @@ import {
   discoverPhotosFromDirectoryListing,
   discoverPhotosInPath,
   dedupePhotos,
-  discoverPhotos
+  discoverPhotos,
+  INITIAL_FOV,
+  MIN_FOV,
+  MAX_FOV,
+  WHEEL_ZOOM_SPEED,
+  FULLSCREEN_UI_HIDE_DELAY,
+  FULLSCREEN_UI_REVEAL_ZONE,
+  STATUS_MESSAGE_DURATION,
+  MAX_COMPASS_ACCURACY_DEGREES,
+  MOTION_BUTTON_LABEL,
+  MOTION_BUTTON_ACTIVE_LABEL,
 } from './config.js';
 
 // ── DOM refs ──────────────────────────────────────────────────
@@ -56,18 +66,8 @@ const scene = new THREE.Scene();
 // PerspectiveCamera used for non-VR rendering. In VR mode Three.js
 // internally uses XR tracking cameras instead; this camera's near/far
 // are inherited by them.
-const INITIAL_FOV = 75;
-const MIN_FOV = 20;
-const MAX_FOV = 90;
-const WHEEL_ZOOM_SPEED = 0.05;
-const FULLSCREEN_UI_HIDE_DELAY = 1800;
-const FULLSCREEN_UI_REVEAL_ZONE = 72;
-const STATUS_MESSAGE_DURATION = 2800;
-const MAX_COMPASS_ACCURACY_DEGREES = 45;
 const camera = new THREE.PerspectiveCamera(INITIAL_FOV, canvas.clientWidth / canvas.clientHeight, 0.1, 1100);
 const fullscreenRoot = document.documentElement;
-const MOTION_BUTTON_LABEL = 'Motion Look';
-const MOTION_BUTTON_ACTIVE_LABEL = 'Stop Motion';
 
 // ── Photo sphere ──────────────────────────────────────────────
 // Scale X by -1 to flip winding order so the texture renders on the
@@ -1037,7 +1037,7 @@ let photos = [];
 
 async function init() {
   const appConfig = await loadAppConfig();
-  applyAppConfig(appConfig);
+  applyAppConfig(appConfig, { titleElement: headerTitle });
 
   onResize();
   initFullscreen();

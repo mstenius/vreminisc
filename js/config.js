@@ -1,5 +1,4 @@
 // Configuration module for VReminisc viewer
-import * as THREE from 'three';
 
 // ── Photo discovery ───────────────────────────────────────────
 // Prefer a static manifest so photo discovery is independent of the HTTP server.
@@ -53,9 +52,9 @@ export async function loadAppConfig() {
   }
 }
 
-export function applyAppConfig(config) {
+export function applyAppConfig(config, { titleElement } = {}) {
   document.title = config.pageTitle;
-  headerTitle.textContent = config.pageTitle;
+  if (titleElement) titleElement.textContent = config.pageTitle;
 }
 
 export function getMediaBaseUrl(textureMediaPath) {
