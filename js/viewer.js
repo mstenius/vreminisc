@@ -4,6 +4,7 @@
 // VR mode hands tracking to the headset, desktop/mobile mode uses drag-to-look and zoom.
 
 import * as THREE from 'three';
+import { createMotionLook } from './motion-look.js';
 
 // ── Photo discovery ───────────────────────────────────────────
 // Prefer a static manifest so photo discovery is independent of the HTTP server.
@@ -37,9 +38,6 @@ import {
   FULLSCREEN_UI_HIDE_DELAY,
   FULLSCREEN_UI_REVEAL_ZONE,
   STATUS_MESSAGE_DURATION,
-  MAX_COMPASS_ACCURACY_DEGREES,
-  MOTION_BUTTON_LABEL,
-  MOTION_BUTTON_ACTIVE_LABEL,
 } from './config.js';
 
 // ── DOM refs ──────────────────────────────────────────────────
@@ -131,8 +129,6 @@ let pinchStartDistance = 0;
 let pinchStartFov = camera.fov;
 let fullscreenUiHideTimeout = 0;
 let statusMessageTimeout = 0;
-let motionLookActive = false;
-let lastMotionSample = null;
 const activePointers = new Map();
 
 function clamp(value, min, max) {
@@ -168,141 +164,18 @@ function setStatusMessage(message, duration = STATUS_MESSAGE_DURATION) {
   }, duration);
 }
 
-function supportsMotionLookUi() {
-  return 'DeviceOrientationEvent' in window
-    && (navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches);
-}
-
-function shouldShowMotionButton() {
-  return supportsMotionLookUi() || (IS_SAFARI && IS_IOS);
-}
-
-function updateMotionButton() {
-  if (!motionButton) return;
-
-  motionButton.textContent = motionLookActive ? MOTION_BUTTON_ACTIVE_LABEL : MOTION_BUTTON_LABEL;
-  motionButton.ariaPressed = motionLookActive ? 'true' : 'false';
-  motionButton.classList.toggle('toolbar-button-active', motionLookActive);
-  motionButton.disabled = renderer.xr.isPresenting;
-}
-
-function disableMotionLook(statusMessage = '') {
-  if (!motionLookActive) return;
-
-  motionLookActive = false;
-  updateMotionButton();
-  applyRotation();
-
-  if (statusMessage) {
-    setStatusMessage(statusMessage);
-  }
-}
-
-function applyMotionLook(nextYaw, nextPitch) {
-  yaw = normalizeAngle(nextYaw);
-  pitch = clamp(nextPitch, -Math.PI / 2, Math.PI / 2);
-  applyRotation();
-}
-
-function getMotionAlphaRadians(event) {
-  const compassHeading = event.webkitCompassHeading;
-  const compassAccuracy = event.webkitCompassAccuracy;
-  const hasUsableCompassHeading = typeof compassHeading === 'number'
-    && !Number.isNaN(compassHeading)
-    && (typeof compassAccuracy !== 'number'
-      || Number.isNaN(compassAccuracy)
-      || compassAccuracy <= MAX_COMPASS_ACCURACY_DEGREES);
-
-  if (hasUsableCompassHeading) {
-    return THREE.MathUtils.degToRad(360 - compassHeading);
-  }
-
-  if (event.alpha == null) return null;
-  return THREE.MathUtils.degToRad(event.alpha);
-}
-
-function getMotionPitchRadians(event) {
-  if (event.beta == null) return null;
-  return THREE.MathUtils.degToRad(event.beta - 90);
-}
-
-function handleDeviceOrientation(event) {
-  const alpha = getMotionAlphaRadians(event);
-  const nextPitch = getMotionPitchRadians(event);
-  if (alpha == null || nextPitch == null) return;
-
-  lastMotionSample = {
-    yaw: alpha,
-    pitch: nextPitch,
-  };
-
-  if (!motionLookActive || renderer.xr.isPresenting) return;
-
-  applyMotionLook(lastMotionSample.yaw, lastMotionSample.pitch);
-}
-
-async function requestMotionPermission() {
-  if (!supportsMotionLookUi()) return false;
-
-  const requestPermission = DeviceOrientationEvent.requestPermission;
-  if (typeof requestPermission !== 'function') return true;
-
-  try {
-    return (await requestPermission.call(DeviceOrientationEvent)) === 'granted';
-  } catch (e) {
-    console.error('Failed to request device orientation permission:', e);
-    return false;
-  }
-}
-
-async function toggleMotionLook() {
-  if (renderer.xr.isPresenting) return;
-
-  if (motionLookActive) {
-    disableMotionLook('Motion look disabled');
-    return;
-  }
-
-  if (!window.isSecureContext) {
-    setStatusMessage('Motion look requires HTTPS on mobile browsers', 3600);
-    return;
-  }
-
-  if (!supportsMotionLookUi()) {
-    setStatusMessage(
-      IS_SAFARI && IS_IOS
-        ? 'Motion sensors are unavailable in this Safari context'
-        : 'Motion sensors are not available on this device'
-    );
-    return;
-  }
-
-  const permissionGranted = await requestMotionPermission();
-  if (!permissionGranted) {
-    setStatusMessage('Motion permission was denied', 3200);
-    return;
-  }
-
-  motionLookActive = true;
-  updateMotionButton();
-
-  if (lastMotionSample) {
-    applyMotionLook(lastMotionSample.yaw, lastMotionSample.pitch);
-  }
-
-  setStatusMessage('Move the device to look around');
-  hideHint();
-}
-
-function initMotionLook() {
-  if (!motionButton || !shouldShowMotionButton()) return;
-
-  motionButton.hidden = false;
-  motionButton.addEventListener('click', toggleMotionLook);
-  updateMotionButton();
-
-  window.addEventListener('deviceorientation', handleDeviceOrientation, true);
-}
+// ── Motion look ───────────────────────────────────────────────
+const motionLook = createMotionLook({
+  motionButton,
+  onMotionSample(nextYaw, nextPitch) {
+    yaw = normalizeAngle(nextYaw);
+    pitch = clamp(nextPitch, -Math.PI / 2, Math.PI / 2);
+    applyRotation();
+  },
+  onStatusMessage: setStatusMessage,
+  onActivate: () => hideHint(),
+  isPresenting: () => renderer.xr.isPresenting,
+});
 
 function getPinchDistance() {
   if (activePointers.size < 2) return 0;
@@ -528,7 +401,7 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
 
-  if (motionLookActive) return;
+  if (motionLook.isActive()) return;
 
   if (primaryPointerId !== e.pointerId) return;
 
@@ -589,7 +462,7 @@ window.addEventListener('keyup', (e) => {
 });
 
 function updateKeyboardLook() {
-  if (renderer.xr.isPresenting || motionLookActive || pressedKeys.size === 0) return;
+  if (renderer.xr.isPresenting || motionLook.isActive() || pressedKeys.size === 0) return;
   if (pressedKeys.has('ArrowLeft'))  yaw += KEY_PAN_SPEED;
   if (pressedKeys.has('ArrowRight')) yaw -= KEY_PAN_SPEED;
   if (pressedKeys.has('ArrowUp'))    pitch = Math.max(-Math.PI / 2, pitch + KEY_PAN_SPEED);
@@ -976,7 +849,7 @@ async function toggleVR() {
     return;
   }
 
-  disableMotionLook();
+  motionLook.disable();
   preVrFov = camera.fov;
   preVrYaw = yaw;
   preVrPitch = pitch;
@@ -1004,7 +877,7 @@ async function toggleVR() {
       setCameraFov(preVrFov);
       vrButton.textContent = 'Enter VR';
       vrButton.classList.remove('vr-button-active');
-      updateMotionButton();
+      motionLook.disable();
       updateFullscreenButton();
       syncFullscreenUiState();
       onResize();
@@ -1014,7 +887,6 @@ async function toggleVR() {
     showVRMenu();
     vrButton.textContent = 'Exit VR';
     vrButton.classList.add('vr-button-active');
-    updateMotionButton();
     updateFullscreenButton();
     syncFullscreenUiState();
     hideHint();
@@ -1041,7 +913,7 @@ async function init() {
 
   onResize();
   initFullscreen();
-  initMotionLook();
+  motionLook.init();
   initXR();
 
   photos = await discoverPhotos(appConfig.textureMediaPaths);
