@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { createMotionLook } from './motion-look.js';
 import { createCameraController } from './camera-controller.js';
+import { createPhotoLoader } from './photo-loader.js';
 
 // ── Photo discovery ───────────────────────────────────────────
 // Prefer a static manifest so photo discovery is independent of the HTTP server.
@@ -31,7 +32,6 @@ import {
   discoverPhotosFromDirectoryListing,
   discoverPhotosInPath,
   dedupePhotos,
-  discoverPhotos,
   INITIAL_FOV,
   FULLSCREEN_UI_HIDE_DELAY,
   FULLSCREEN_UI_REVEAL_ZONE,
@@ -75,8 +75,6 @@ const sphereMat = new THREE.MeshBasicMaterial();
 const sphere = new THREE.Mesh(sphereGeo, sphereMat);
 scene.add(sphere);
 
-const texLoader = new THREE.TextureLoader();
-
 function photoFilename(photo) {
   return photo.url.split('/').pop();
 }
@@ -91,30 +89,9 @@ function selectPhoto(index) {
   const photo = photos[index];
   if (!photo) return;
   photoSelect.value = index;
-  loadPhoto(photo);
+  photoLoader.loadPhoto(photo);
   setPhotoUrlParam(photo);
   drawVRMenu();
-}
-
-function loadPhoto({ name, url }) {
-  loadStatus.textContent = `Loading ${name}…`;
-
-  texLoader.load(
-    url,
-    (tex) => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      const prev = sphereMat.map;
-      sphereMat.map = tex;
-      cameraCtrl.setFov(INITIAL_FOV);
-      sphereMat.needsUpdate = true;
-      if (prev) prev.dispose();
-      loadStatus.textContent = '';
-    },
-    undefined,
-    () => {
-      loadStatus.textContent = `Failed to load ${name}`;
-    }
-  );
 }
 
 let fullscreenUiHideTimeout = 0;
@@ -156,6 +133,16 @@ const motionLook = createMotionLook({
   onStatusMessage: setStatusMessage,
   onActivate: () => hideHint(),
   isVRActive: () => renderer.xr.isPresenting,
+});
+
+// ── Photo loader ──────────────────────────────────────────────
+const photoLoader = createPhotoLoader(sphereMat, {
+  onLoadStart: (name) => { loadStatus.textContent = `Loading ${name}…`; },
+  onLoadEnd: () => {
+    cameraCtrl.setFov(INITIAL_FOV);
+    loadStatus.textContent = '';
+  },
+  onError: (name) => { loadStatus.textContent = `Failed to load ${name}`; },
 });
 
 function getFullscreenElement() {
@@ -783,7 +770,7 @@ async function init() {
   motionLook.init();
   initXR();
 
-  photos = await discoverPhotos(appConfig.textureMediaPaths);
+  photos = await photoLoader.loadPhotos(appConfig.textureMediaPaths);
 
   if (photos.length === 0) {
     loadStatus.textContent = 'No images found in configured texture media paths';
