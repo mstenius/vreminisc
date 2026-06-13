@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { createMotionLook } from './motion-look.js';
+import { createCameraController } from './camera-controller.js';
 
 // ── Photo discovery ───────────────────────────────────────────
 // Prefer a static manifest so photo discovery is independent of the HTTP server.
@@ -32,9 +33,6 @@ import {
   dedupePhotos,
   discoverPhotos,
   INITIAL_FOV,
-  MIN_FOV,
-  MAX_FOV,
-  WHEEL_ZOOM_SPEED,
   FULLSCREEN_UI_HIDE_DELAY,
   FULLSCREEN_UI_REVEAL_ZONE,
   STATUS_MESSAGE_DURATION,
@@ -107,7 +105,7 @@ function loadPhoto({ name, url }) {
       tex.colorSpace = THREE.SRGBColorSpace;
       const prev = sphereMat.map;
       sphereMat.map = tex;
-      setCameraFov(INITIAL_FOV);
+      cameraCtrl.setFov(INITIAL_FOV);
       sphereMat.needsUpdate = true;
       if (prev) prev.dispose();
       loadStatus.textContent = '';
@@ -119,30 +117,8 @@ function loadPhoto({ name, url }) {
   );
 }
 
-// ── Drag-to-look + zoom (pointer events handle mouse + touch uniformly) ──
-let yaw = 0;
-let pitch = 0;
-let primaryPointerId = null;
-let prevX = 0;
-let prevY = 0;
-let pinchStartDistance = 0;
-let pinchStartFov = camera.fov;
 let fullscreenUiHideTimeout = 0;
 let statusMessageTimeout = 0;
-const activePointers = new Map();
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function normalizeAngle(angle) {
-  return THREE.MathUtils.euclideanModulo(angle + Math.PI, Math.PI * 2) - Math.PI;
-}
-
-function setCameraFov(nextFov) {
-  camera.fov = clamp(nextFov, MIN_FOV, MAX_FOV);
-  camera.updateProjectionMatrix();
-}
 
 function setStatusMessage(message, duration = STATUS_MESSAGE_DURATION) {
   if (!loadStatus) return;
@@ -164,51 +140,23 @@ function setStatusMessage(message, duration = STATUS_MESSAGE_DURATION) {
   }, duration);
 }
 
+// ── Camera controller (pointer / touch / keyboard look + zoom) ─
+const cameraCtrl = createCameraController(canvas, camera, {
+  isVRActive: () => renderer.xr.isPresenting,
+  isMotionActive: () => motionLook.isActive(),
+  onInteract: () => hideHint(),
+});
+
 // ── Motion look ───────────────────────────────────────────────
 const motionLook = createMotionLook({
   motionButton,
   onMotionSample(nextYaw, nextPitch) {
-    yaw = normalizeAngle(nextYaw);
-    pitch = clamp(nextPitch, -Math.PI / 2, Math.PI / 2);
-    applyRotation();
+    cameraCtrl.setYawPitch(nextYaw, nextPitch);
   },
   onStatusMessage: setStatusMessage,
   onActivate: () => hideHint(),
-  isPresenting: () => renderer.xr.isPresenting,
+  isVRActive: () => renderer.xr.isPresenting,
 });
-
-function getPinchDistance() {
-  if (activePointers.size < 2) return 0;
-  const [first, second] = Array.from(activePointers.values());
-  return Math.hypot(second.x - first.x, second.y - first.y);
-}
-
-function syncPointerGestureState() {
-  if (activePointers.size === 1) {
-    const [[pointerId, pointer]] = activePointers.entries();
-    primaryPointerId = pointerId;
-    prevX = pointer.x;
-    prevY = pointer.y;
-    pinchStartDistance = 0;
-    pinchStartFov = camera.fov;
-    return;
-  }
-
-  primaryPointerId = null;
-
-  if (activePointers.size >= 2) {
-    pinchStartDistance = getPinchDistance();
-    pinchStartFov = camera.fov;
-    return;
-  }
-
-  pinchStartDistance = 0;
-  pinchStartFov = camera.fov;
-}
-
-function applyRotation() {
-  camera.rotation.set(pitch, yaw, 0, 'YXZ');
-}
 
 function getFullscreenElement() {
   return document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -369,59 +317,6 @@ function initFullscreen() {
   }
 }
 
-canvas.addEventListener('pointerdown', (e) => {
-  if (renderer.xr.isPresenting) return;
-  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  syncPointerGestureState();
-  canvas.setPointerCapture(e.pointerId);
-  hideHint();
-});
-
-canvas.addEventListener('pointerup', (e) => {
-  activePointers.delete(e.pointerId);
-  syncPointerGestureState();
-});
-
-canvas.addEventListener('pointercancel', (e) => {
-  activePointers.delete(e.pointerId);
-  syncPointerGestureState();
-});
-
-canvas.addEventListener('pointermove', (e) => {
-  if (renderer.xr.isPresenting || !activePointers.has(e.pointerId)) return;
-
-  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-  if (activePointers.size >= 2) {
-    const pinchDistance = getPinchDistance();
-    if (pinchStartDistance > 0 && pinchDistance > 0) {
-      setCameraFov(pinchStartFov / (pinchDistance / pinchStartDistance));
-      hideHint();
-    }
-    return;
-  }
-
-  if (motionLook.isActive()) return;
-
-  if (primaryPointerId !== e.pointerId) return;
-
-  const dx = e.clientX - prevX;
-  const dy = e.clientY - prevY;
-  prevX = e.clientX;
-  prevY = e.clientY;
-  yaw   += dx * 0.003;
-  pitch += dy * 0.003;
-  pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
-  applyRotation();
-});
-
-canvas.addEventListener('wheel', (e) => {
-  if (renderer.xr.isPresenting) return;
-  e.preventDefault();
-  setCameraFov(camera.fov + e.deltaY * WHEEL_ZOOM_SPEED);
-  hideHint();
-}, { passive: false });
-
 // ── Resize ────────────────────────────────────────────────────
 function onResize() {
   if (renderer.xr.isPresenting) return;
@@ -442,32 +337,6 @@ function hideHint() {
   hintHidden = true;
   hint.classList.add('hidden');
   setTimeout(() => { hint.remove(); }, 600);
-}
-
-// ── Arrow-key panning ─────────────────────────────────────────
-const KEY_PAN_SPEED = 0.022; // radians per frame at 60 fps
-const pressedKeys = new Set();
-
-window.addEventListener('keydown', (e) => {
-  const tag = document.activeElement?.tagName.toLowerCase();
-  if (tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'button') return;
-  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-    e.preventDefault();
-    pressedKeys.add(e.key);
-  }
-});
-
-window.addEventListener('keyup', (e) => {
-  pressedKeys.delete(e.key);
-});
-
-function updateKeyboardLook() {
-  if (renderer.xr.isPresenting || motionLook.isActive() || pressedKeys.size === 0) return;
-  if (pressedKeys.has('ArrowLeft'))  yaw += KEY_PAN_SPEED;
-  if (pressedKeys.has('ArrowRight')) yaw -= KEY_PAN_SPEED;
-  if (pressedKeys.has('ArrowUp'))    pitch = Math.max(-Math.PI / 2, pitch + KEY_PAN_SPEED);
-  if (pressedKeys.has('ArrowDown'))  pitch = Math.min(Math.PI / 2, pitch - KEY_PAN_SPEED);
-  applyRotation();
 }
 
 // ── VR Menu ───────────────────────────────────────────────────
@@ -850,9 +719,9 @@ async function toggleVR() {
   }
 
   motionLook.disable();
-  preVrFov = camera.fov;
-  preVrYaw = yaw;
-  preVrPitch = pitch;
+  preVrFov = cameraCtrl.getFov();
+  preVrYaw = cameraCtrl.getYaw();
+  preVrPitch = cameraCtrl.getPitch();
 
   try {
     const session = await navigator.xr.requestSession('immersive-vr', {
@@ -867,14 +736,12 @@ async function toggleVR() {
       xrSession = null;
       teardownXRControllers();
       hideVRMenu();
-      yaw = preVrYaw;
-      pitch = preVrPitch;
       camera.position.set(0, 0, 0);
       camera.scale.set(1, 1, 1);
       camera.zoom = 1;
-      applyRotation();
+      cameraCtrl.setYawPitch(preVrYaw, preVrPitch);
       camera.updateMatrixWorld(true);
-      setCameraFov(preVrFov);
+      cameraCtrl.setFov(preVrFov);
       vrButton.textContent = 'Enter VR';
       vrButton.classList.remove('vr-button-active');
       motionLook.disable();
@@ -899,7 +766,7 @@ async function toggleVR() {
 // setAnimationLoop is XR-compatible: Three.js switches to XR frame
 // delivery automatically when a session is active.
 renderer.setAnimationLoop(() => {
-  updateKeyboardLook();
+  cameraCtrl.update();
   updateVRMenu();
   renderer.render(scene, camera);
 });

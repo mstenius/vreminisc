@@ -9,17 +9,17 @@ import {
 } from './config.js';
 
 /**
- * createMotionLook({ motionButton, onMotionSample, onStatusMessage, onActivate, isPresenting })
+ * createMotionLook({ motionButton, onMotionSample, onStatusMessage, onActivate, isVRActive })
  *
  * @param {HTMLElement}   motionButton      - The toolbar button element
  * @param {Function}      onMotionSample    - Called with (yaw, pitch) on each orientation event when active
  * @param {Function}      onStatusMessage   - Called with (message, duration?) to show a status message
  * @param {Function}      onActivate        - Called when motion look is successfully activated (e.g. hide hint)
- * @param {Function}      isPresenting      - Returns true when XR session is active
+ * @param {Function}      isVRActive        - Returns true when XR session is active
  *
  * @returns {{ init(), toggle(), disable(msg?), isActive(), dispose() }}
  */
-export function createMotionLook({ motionButton, onMotionSample, onStatusMessage, onActivate, isPresenting }) {
+export function createMotionLook({ motionButton, onMotionSample, onStatusMessage, onActivate, isVRActive }) {
   let motionLookActive = false;
   let lastMotionSample = null;
 
@@ -30,7 +30,7 @@ export function createMotionLook({ motionButton, onMotionSample, onStatusMessage
     motionButton.textContent = motionLookActive ? MOTION_BUTTON_ACTIVE_LABEL : MOTION_BUTTON_LABEL;
     motionButton.ariaPressed = motionLookActive ? 'true' : 'false';
     motionButton.classList.toggle('toolbar-button-active', motionLookActive);
-    motionButton.disabled = isPresenting();
+    motionButton.disabled = isVRActive();
   }
 
   // ── Support detection ────────────────────────────────────────
@@ -77,7 +77,7 @@ export function createMotionLook({ motionButton, onMotionSample, onStatusMessage
 
     lastMotionSample = { yaw: alpha, pitch: nextPitch };
 
-    if (!motionLookActive || isPresenting()) return;
+    if (!motionLookActive || isVRActive()) return;
 
     onMotionSample(lastMotionSample.yaw, lastMotionSample.pitch);
   }
@@ -101,7 +101,7 @@ export function createMotionLook({ motionButton, onMotionSample, onStatusMessage
   // ── Public API ───────────────────────────────────────────────
 
   async function toggle() {
-    if (isPresenting()) return;
+    if (isVRActive()) return;
 
     if (motionLookActive) {
       disable('Motion look disabled');
