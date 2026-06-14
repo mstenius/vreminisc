@@ -8,17 +8,16 @@ import { createMotionLook } from './motion-look.js';
 import { createCameraController } from './camera-controller.js';
 import { createPhotoLoader } from './photo-loader.js';
 import { createVRMenu } from './vr-menu.js';
+import { createFullscreenManager } from './fullscreen-manager.js';
 
 // ── Photo discovery ───────────────────────────────────────────
 // Prefer a static manifest so photo discovery is independent of the HTTP server.
 // Fall back to HTML directory listings when available for convenience.
-import { 
+import {
   IMAGE_RE,
   APP_CONFIG_PATH,
   DEFAULT_TEXTURE_MEDIA_PATHS,
   DEFAULT_APP_CONFIG,
-  IS_SAFARI,
-  IS_IOS,
   normalizeTextureMediaPath,
   normalizeTextureMediaPaths,
   normalizeAppConfig,
@@ -34,8 +33,6 @@ import {
   discoverPhotosInPath,
   dedupePhotos,
   INITIAL_FOV,
-  FULLSCREEN_UI_HIDE_DELAY,
-  FULLSCREEN_UI_REVEAL_ZONE,
   STATUS_MESSAGE_DURATION,
 } from './config.js';
 
@@ -64,7 +61,6 @@ const scene = new THREE.Scene();
 // internally uses XR tracking cameras instead; this camera's near/far
 // are inherited by them.
 const camera = new THREE.PerspectiveCamera(INITIAL_FOV, canvas.clientWidth / canvas.clientHeight, 0.1, 1100);
-const fullscreenRoot = document.documentElement;
 
 // ── Photo sphere ──────────────────────────────────────────────
 // Scale X by -1 to flip winding order so the texture renders on the
@@ -95,7 +91,6 @@ function selectPhoto(index) {
   vrMenu.draw();
 }
 
-let fullscreenUiHideTimeout = 0;
 let statusMessageTimeout = 0;
 
 function setStatusMessage(message, duration = STATUS_MESSAGE_DURATION) {
@@ -146,165 +141,6 @@ const photoLoader = createPhotoLoader(sphereMat, {
   onError: (name) => { loadStatus.textContent = `Failed to load ${name}`; },
 });
 
-function getFullscreenElement() {
-  return document.fullscreenElement || document.webkitFullscreenElement || null;
-}
-
-function supportsFullscreen() {
-  return Boolean(
-    document.fullscreenEnabled
-    || document.webkitFullscreenEnabled
-    || fullscreenRoot.requestFullscreen
-    || fullscreenRoot.webkitRequestFullscreen
-  );
-}
-
-async function requestFullscreen() {
-  if (fullscreenRoot.requestFullscreen) {
-    await fullscreenRoot.requestFullscreen();
-    return;
-  }
-
-  if (fullscreenRoot.webkitRequestFullscreen) {
-    await Promise.resolve(fullscreenRoot.webkitRequestFullscreen());
-  }
-}
-
-async function exitFullscreen() {
-  if (document.exitFullscreen) {
-    await document.exitFullscreen();
-    return;
-  }
-
-  if (document.webkitExitFullscreen) {
-    await Promise.resolve(document.webkitExitFullscreen());
-  }
-}
-
-function updateFullscreenButton() {
-  if (!fullscreenButton) return;
-
-  const isFullscreen = Boolean(getFullscreenElement());
-  fullscreenButton.textContent = isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
-  fullscreenButton.ariaPressed = isFullscreen ? 'true' : 'false';
-  fullscreenButton.disabled = renderer.xr.isPresenting;
-}
-
-function clearFullscreenUiHideTimeout() {
-  if (!fullscreenUiHideTimeout) return;
-  window.clearTimeout(fullscreenUiHideTimeout);
-  fullscreenUiHideTimeout = 0;
-}
-
-function isFullscreenBrowserMode() {
-  return Boolean(getFullscreenElement()) && !renderer.xr.isPresenting;
-}
-
-function showFullscreenUi() {
-  if (!header) return;
-  header.classList.remove('hidden-in-fullscreen');
-}
-
-function hideFullscreenUi() {
-  if (!header || !isFullscreenBrowserMode()) return;
-  header.classList.add('hidden-in-fullscreen');
-}
-
-function scheduleFullscreenUiHide() {
-  clearFullscreenUiHideTimeout();
-
-  if (!isFullscreenBrowserMode()) {
-    showFullscreenUi();
-    return;
-  }
-
-  fullscreenUiHideTimeout = window.setTimeout(() => {
-    fullscreenUiHideTimeout = 0;
-    hideFullscreenUi();
-  }, FULLSCREEN_UI_HIDE_DELAY);
-}
-
-function syncFullscreenUiState() {
-  const fullscreenActive = isFullscreenBrowserMode();
-  document.body.classList.toggle('fullscreen-active', fullscreenActive);
-
-  if (!fullscreenActive) {
-    clearFullscreenUiHideTimeout();
-    showFullscreenUi();
-    return;
-  }
-
-  showFullscreenUi();
-  scheduleFullscreenUiHide();
-}
-
-async function toggleFullscreen() {
-  if (renderer.xr.isPresenting) return;
-
-  if (!supportsFullscreen()) {
-    setStatusMessage(
-      IS_SAFARI && IS_IOS
-        ? 'Fullscreen is limited in iPhone Safari'
-        : 'Fullscreen is not supported in this browser',
-      3600
-    );
-    return;
-  }
-
-  hideHint();
-
-  try {
-    if (getFullscreenElement()) {
-      await exitFullscreen();
-      return;
-    }
-
-    await requestFullscreen();
-  } catch (e) {
-    console.error('Failed to toggle fullscreen:', e);
-  }
-}
-
-function initFullscreen() {
-  if (!fullscreenButton || !supportsFullscreen()) return;
-
-  fullscreenButton.hidden = false;
-  fullscreenButton.addEventListener('click', toggleFullscreen);
-  updateFullscreenButton();
-
-  const handleFullscreenChange = () => {
-    updateFullscreenButton();
-    syncFullscreenUiState();
-    onResize();
-    const tag = document.activeElement?.tagName.toLowerCase();
-    if (tag === 'button' || tag === 'input' || tag === 'select') {
-      document.activeElement.blur();
-    }
-  };
-
-  document.addEventListener('fullscreenchange', handleFullscreenChange);
-  document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-
-  document.addEventListener('pointermove', (e) => {
-    if (!isFullscreenBrowserMode()) return;
-    if (e.clientY > FULLSCREEN_UI_REVEAL_ZONE && !header?.matches(':hover')) return;
-    showFullscreenUi();
-    scheduleFullscreenUiHide();
-  });
-
-  if (header) {
-    header.addEventListener('pointerenter', () => {
-      if (!isFullscreenBrowserMode()) return;
-      showFullscreenUi();
-      clearFullscreenUiHideTimeout();
-    });
-
-    header.addEventListener('pointerleave', () => {
-      scheduleFullscreenUiHide();
-    });
-  }
-}
-
 // ── Resize ────────────────────────────────────────────────────
 function onResize() {
   if (renderer.xr.isPresenting) return;
@@ -326,6 +162,16 @@ function hideHint() {
   hint.classList.add('hidden');
   setTimeout(() => { hint.remove(); }, 600);
 }
+
+// ── Fullscreen ────────────────────────────────────────────────
+const fullscreenManager = createFullscreenManager({
+  fullscreenButton,
+  header,
+  isVRActive: () => renderer.xr.isPresenting,
+  onStatusMessage: setStatusMessage,
+  onResize,
+  onInteract: () => hideHint(),
+});
 
 // ── VR Menu ───────────────────────────────────────────────────
 const vrMenu = createVRMenu(scene, renderer, {
@@ -388,8 +234,7 @@ async function toggleVR() {
       vrButton.textContent = 'Enter VR';
       vrButton.classList.remove('vr-button-active');
       motionLook.disable();
-      updateFullscreenButton();
-      syncFullscreenUiState();
+      fullscreenManager.sync();
       onResize();
     });
     xrSession = session;
@@ -397,8 +242,7 @@ async function toggleVR() {
     vrMenu.show();
     vrButton.textContent = 'Exit VR';
     vrButton.classList.add('vr-button-active');
-    updateFullscreenButton();
-    syncFullscreenUiState();
+    fullscreenManager.sync();
     hideHint();
   } catch (e) {
     console.error('Failed to start VR session:', e);
@@ -422,7 +266,7 @@ async function init() {
   applyAppConfig(appConfig, { titleElement: headerTitle });
 
   onResize();
-  initFullscreen();
+  fullscreenManager.init();
   motionLook.init();
   initXR();
 
