@@ -9,31 +9,12 @@ import { createCameraController } from './camera-controller.js';
 import { createPhotoLoader } from './photo-loader.js';
 import { createVRMenu } from './vr-menu.js';
 import { createFullscreenManager } from './fullscreen-manager.js';
+import { createUIManager } from './browser-ui-manager.js';
 
-// ── Photo discovery ───────────────────────────────────────────
-// Prefer a static manifest so photo discovery is independent of the HTTP server.
-// Fall back to HTML directory listings when available for convenience.
 import {
-  IMAGE_RE,
-  APP_CONFIG_PATH,
-  DEFAULT_TEXTURE_MEDIA_PATHS,
-  DEFAULT_APP_CONFIG,
-  normalizeTextureMediaPath,
-  normalizeTextureMediaPaths,
-  normalizeAppConfig,
+  INITIAL_FOV,
   loadAppConfig,
   applyAppConfig,
-  getMediaBaseUrl,
-  getPhotosManifestUrl,
-  humanizePhotoName,
-  toPhoto,
-  normalizeManifestEntry,
-  discoverPhotosFromManifest,
-  discoverPhotosFromDirectoryListing,
-  discoverPhotosInPath,
-  dedupePhotos,
-  INITIAL_FOV,
-  STATUS_MESSAGE_DURATION,
 } from './config.js';
 
 // ── DOM refs ──────────────────────────────────────────────────
@@ -91,33 +72,21 @@ function selectPhoto(index) {
   vrMenu.draw();
 }
 
-let statusMessageTimeout = 0;
-
-function setStatusMessage(message, duration = STATUS_MESSAGE_DURATION) {
-  if (!loadStatus) return;
-
-  if (statusMessageTimeout) {
-    window.clearTimeout(statusMessageTimeout);
-    statusMessageTimeout = 0;
-  }
-
-  loadStatus.textContent = message;
-
-  if (duration <= 0) return;
-
-  statusMessageTimeout = window.setTimeout(() => {
-    statusMessageTimeout = 0;
-    if (loadStatus.textContent === message) {
-      loadStatus.textContent = '';
-    }
-  }, duration);
-}
+// ── UI Manager ────────────────────────────────────────────────
+const uiManager = createUIManager({
+  photoSelect,
+  loadStatus,
+  hint,
+  motionButton,
+  onPhotoSelect: (idx) => selectPhoto(idx),
+  onResize,
+});
 
 // ── Camera controller (pointer / touch / keyboard look + zoom) ─
 const cameraCtrl = createCameraController(canvas, camera, {
   isVRActive: () => renderer.xr.isPresenting,
   isMotionActive: () => motionLook.isActive(),
-  onInteract: () => hideHint(),
+  onInteract: () => uiManager.hideHint(),
 });
 
 // ── Motion look ───────────────────────────────────────────────
@@ -126,19 +95,19 @@ const motionLook = createMotionLook({
   onMotionSample(nextYaw, nextPitch) {
     cameraCtrl.setYawPitch(nextYaw, nextPitch);
   },
-  onStatusMessage: setStatusMessage,
-  onActivate: () => hideHint(),
+  onStatusMessage: uiManager.setStatus,
+  onActivate: () => uiManager.hideHint(),
   isVRActive: () => renderer.xr.isPresenting,
 });
 
 // ── Photo loader ──────────────────────────────────────────────
 const photoLoader = createPhotoLoader(sphereMat, {
-  onLoadStart: (name) => { loadStatus.textContent = `Loading ${name}…`; },
+  onLoadStart: (name) => uiManager.setStatus(`Loading ${name}…`, 0),
   onLoadEnd: () => {
     cameraCtrl.setFov(INITIAL_FOV);
-    loadStatus.textContent = '';
+    uiManager.setStatus('', 0);
   },
-  onError: (name) => { loadStatus.textContent = `Failed to load ${name}`; },
+  onError: (name) => uiManager.setStatus(`Failed to load ${name}`, 0),
 });
 
 // ── Resize ────────────────────────────────────────────────────
@@ -151,26 +120,14 @@ function onResize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
-window.addEventListener('resize', onResize);
-
-// ── Hint overlay ──────────────────────────────────────────────
-let hintHidden = false;
-
-function hideHint() {
-  if (hintHidden) return;
-  hintHidden = true;
-  hint.classList.add('hidden');
-  setTimeout(() => { hint.remove(); }, 600);
-}
-
 // ── Fullscreen ────────────────────────────────────────────────
 const fullscreenManager = createFullscreenManager({
   fullscreenButton,
   header,
   isVRActive: () => renderer.xr.isPresenting,
-  onStatusMessage: setStatusMessage,
+  onStatusMessage: uiManager.setStatus,
   onResize,
-  onInteract: () => hideHint(),
+  onInteract: () => uiManager.hideHint(),
 });
 
 // ── VR Menu ───────────────────────────────────────────────────
@@ -243,7 +200,7 @@ async function toggleVR() {
     vrButton.textContent = 'Exit VR';
     vrButton.classList.add('vr-button-active');
     fullscreenManager.sync();
-    hideHint();
+    uiManager.hideHint();
   } catch (e) {
     console.error('Failed to start VR session:', e);
   }
@@ -266,6 +223,7 @@ async function init() {
   applyAppConfig(appConfig, { titleElement: headerTitle });
 
   onResize();
+  uiManager.init();
   fullscreenManager.init();
   motionLook.init();
   initXR();
@@ -273,21 +231,11 @@ async function init() {
   photos = await photoLoader.loadPhotos(appConfig.textureMediaPaths);
 
   if (photos.length === 0) {
-    loadStatus.textContent = 'No images found in configured texture media paths';
+    uiManager.setStatus('No images found in configured texture media paths', 0);
     return;
   }
 
-  photos.forEach((p, i) => {
-    const opt = document.createElement('option');
-    opt.value = i;
-    opt.textContent = p.name;
-    photoSelect.appendChild(opt);
-  });
-
-  photoSelect.addEventListener('change', () => {
-    selectPhoto(Number(photoSelect.value));
-    hideHint();
-  });
+  uiManager.setPhotos(photos);
 
   const paramFilename = new URLSearchParams(location.search).get('photo');
   const initialIndex = paramFilename
