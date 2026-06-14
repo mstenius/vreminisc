@@ -10,6 +10,7 @@ import { createPhotoLoader } from './photo-loader.js';
 import { createVRMenu } from './vr-menu.js';
 import { createFullscreenManager } from './fullscreen-manager.js';
 import { createUIManager } from './browser-ui-manager.js';
+import { createXRManager } from './xr-manager.js';
 
 import {
   INITIAL_FOV,
@@ -120,6 +121,7 @@ function onResize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
+
 // ── Fullscreen ────────────────────────────────────────────────
 const fullscreenManager = createFullscreenManager({
   fullscreenButton,
@@ -133,78 +135,42 @@ const fullscreenManager = createFullscreenManager({
 // ── VR Menu ───────────────────────────────────────────────────
 const vrMenu = createVRMenu(scene, renderer, {
   onSelectPhoto: (idx) => selectPhoto(idx),
-  onExitVR: () => { if (xrSession) xrSession.end(); },
+  onExitVR: () => xrManager.endSession(),
   getPhotos: () => photos,
   getCurrentPhotoIndex: () => photoSelect.value !== '' ? Number(photoSelect.value) : 0,
 });
 
 // ── WebXR ─────────────────────────────────────────────────────
-let xrSession = null;
-let vrButton = null;
 let preVrFov = INITIAL_FOV;
 let preVrYaw = 0;
 let preVrPitch = 0;
 
-async function initXR() {
-  if (!('xr' in navigator)) return;
-
-  const supported = await navigator.xr.isSessionSupported('immersive-vr').catch(() => false);
-  if (!supported) return;
-
-  vrButton = document.createElement('button');
-  vrButton.className = 'vr-button';
-  vrButton.textContent = 'Enter VR';
-  vrButton.addEventListener('click', toggleVR);
-  vrButtonContainer.appendChild(vrButton);
-}
-
-async function toggleVR() {
-  if (xrSession) {
-    xrSession.end();
-    return;
-  }
-
-  motionLook.disable();
-  preVrFov = cameraCtrl.getFov();
-  preVrYaw = cameraCtrl.getYaw();
-  preVrPitch = cameraCtrl.getPitch();
-
-  try {
-    const session = await navigator.xr.requestSession('immersive-vr', {
-      optionalFeatures: ['local-floor', 'bounded-floor'],
-    });
-
-    await renderer.xr.setSession(session);
-
-    // Register AFTER setSession so Three.js's own 'end' handler runs first,
-    // setting isPresenting=false before our cleanup code reads it.
-    session.addEventListener('end', () => {
-      xrSession = null;
-      vrMenu.teardownControllers();
-      vrMenu.hide();
-      camera.position.set(0, 0, 0);
-      camera.scale.set(1, 1, 1);
-      camera.zoom = 1;
-      cameraCtrl.setYawPitch(preVrYaw, preVrPitch);
-      camera.updateMatrixWorld(true);
-      cameraCtrl.setFov(preVrFov);
-      vrButton.textContent = 'Enter VR';
-      vrButton.classList.remove('vr-button-active');
-      motionLook.disable();
-      fullscreenManager.sync();
-      onResize();
-    });
-    xrSession = session;
+const xrManager = createXRManager(renderer, {
+  buttonContainer: vrButtonContainer,
+  onSessionStart() {
+    motionLook.disable();
+    preVrFov = cameraCtrl.getFov();
+    preVrYaw = cameraCtrl.getYaw();
+    preVrPitch = cameraCtrl.getPitch();
     vrMenu.setupControllers();
     vrMenu.show();
-    vrButton.textContent = 'Exit VR';
-    vrButton.classList.add('vr-button-active');
     fullscreenManager.sync();
     uiManager.hideHint();
-  } catch (e) {
-    console.error('Failed to start VR session:', e);
-  }
-}
+  },
+  onSessionEnd() {
+    vrMenu.teardownControllers();
+    vrMenu.hide();
+    camera.position.set(0, 0, 0);
+    camera.scale.set(1, 1, 1);
+    camera.zoom = 1;
+    cameraCtrl.setYawPitch(preVrYaw, preVrPitch);
+    camera.updateMatrixWorld(true);
+    cameraCtrl.setFov(preVrFov);
+    motionLook.disable();
+    fullscreenManager.sync();
+    onResize();
+  },
+});
 
 // ── Render loop ───────────────────────────────────────────────
 // setAnimationLoop is XR-compatible: Three.js switches to XR frame
@@ -226,7 +192,7 @@ async function init() {
   uiManager.init();
   fullscreenManager.init();
   motionLook.init();
-  initXR();
+  xrManager.init();
 
   photos = await photoLoader.loadPhotos(appConfig.textureMediaPaths);
 
