@@ -101,6 +101,7 @@ header h1 {
 }
 
 .source-link {
+  margin-left: auto;
   color: #8f8f8f;
   font-size: 12px;
   text-decoration: none;
@@ -114,7 +115,6 @@ header h1 {
 }
 
 .version-label {
-  margin-left: auto;
   color: #8f8f8f;
   font-size: 12px;
   letter-spacing: 0.02em;
