@@ -21,7 +21,7 @@ function normalizeAngle(angle) {
  * createCameraController(canvas, camera, { isVRActive, isMotionActive, onInteract })
  *
  * @param {HTMLCanvasElement} canvas         - The WebGL canvas (pointer/wheel target)
- * @param {THREE.PerspectiveCamera} camera   - The non-VR camera (owns fov + rotation)
+ * @param {THREE.PerspectiveCamera} threeCam   - The non-VR camera (owns fov + rotation)
  * @param {Function}      isVRActive        - Returns true when an XR session is active
  * @param {Function}      isMotionActive      - Returns true when motion look owns rotation
  * @param {Function}      onInteract          - Called on the first input of a gesture (e.g. hide hint)
@@ -31,14 +31,14 @@ function normalizeAngle(angle) {
  *
  * @returns {{ update(), getYaw(), getPitch(), setYawPitch(y, p), setFov(fov), getFov(), dispose() }}
  */
-export function createCameraController(canvas, camera, { isVRActive, isMotionActive = () => false, onInteract } = {}) {
+export function createCameraController(canvas, threeCam, { isVRActive, isMotionActive = () => false, onInteract } = {}) {
   let yaw = 0;
   let pitch = 0;
   let primaryPointerId = null;
   let prevX = 0;
   let prevY = 0;
   let pinchStartDistance = 0;
-  let pinchStartFov = camera.fov;
+  let pinchStartFov = threeCam.fov;
   const activePointers = new Map();
   const pressedKeys = new Set();
 
@@ -47,7 +47,7 @@ export function createCameraController(canvas, camera, { isVRActive, isMotionAct
   }
 
   function applyRotation() {
-    camera.rotation.set(pitch, yaw, 0, 'YXZ');
+    threeCam.rotation.set(pitch, yaw, 0, 'YXZ');
   }
 
   // ── Public state accessors ───────────────────────────────────
@@ -67,12 +67,12 @@ export function createCameraController(canvas, camera, { isVRActive, isMotionAct
   }
 
   function setFov(nextFov) {
-    camera.fov = clamp(nextFov, MIN_FOV, MAX_FOV);
-    camera.updateProjectionMatrix();
+    threeCam.fov = clamp(nextFov, MIN_FOV, MAX_FOV);
+    threeCam.updateProjectionMatrix();
   }
 
   function getFov() {
-    return camera.fov;
+    return threeCam.fov;
   }
 
   // ── Pointer gesture state ────────────────────────────────────
@@ -90,7 +90,7 @@ export function createCameraController(canvas, camera, { isVRActive, isMotionAct
       prevX = pointer.x;
       prevY = pointer.y;
       pinchStartDistance = 0;
-      pinchStartFov = camera.fov;
+      pinchStartFov = threeCam.fov;
       return;
     }
 
@@ -98,12 +98,12 @@ export function createCameraController(canvas, camera, { isVRActive, isMotionAct
 
     if (activePointers.size >= 2) {
       pinchStartDistance = getPinchDistance();
-      pinchStartFov = camera.fov;
+      pinchStartFov = threeCam.fov;
       return;
     }
 
     pinchStartDistance = 0;
-    pinchStartFov = camera.fov;
+    pinchStartFov = threeCam.fov;
   }
 
   // ── Pointer / wheel handlers ─────────────────────────────────
@@ -157,7 +157,7 @@ export function createCameraController(canvas, camera, { isVRActive, isMotionAct
   function handleWheel(e) {
     if (isVRActive()) return;
     e.preventDefault();
-    setFov(camera.fov + e.deltaY * WHEEL_ZOOM_SPEED);
+    setFov(threeCam.fov + e.deltaY * WHEEL_ZOOM_SPEED);
     notifyInteract();
   }
 

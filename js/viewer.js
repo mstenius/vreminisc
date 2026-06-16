@@ -42,7 +42,7 @@ const scene = new THREE.Scene();
 // PerspectiveCamera used for non-VR rendering. In VR mode Three.js
 // internally uses XR tracking cameras instead; this camera's near/far
 // are inherited by them.
-const camera = new THREE.PerspectiveCamera(INITIAL_FOV, canvas.clientWidth / canvas.clientHeight, 0.1, 1100);
+const threeCam = new THREE.PerspectiveCamera(INITIAL_FOV, canvas.clientWidth / canvas.clientHeight, 0.1, 1100);
 
 // ── Photo sphere ──────────────────────────────────────────────
 // Scale X by -1 to flip winding order so the texture renders on the
@@ -84,7 +84,7 @@ const uiManager = createUIManager({
 });
 
 // ── Camera controller (pointer / touch / keyboard look + zoom) ─
-const cameraCtrl = createCameraController(canvas, camera, {
+const cameraCtrl = createCameraController(canvas, threeCam, {
   isVRActive: () => renderer.xr.isPresenting,
   isMotionActive: () => motionLook.isActive(),
   onInteract: () => uiManager.hideHint(),
@@ -118,8 +118,8 @@ function onResize() {
   const h = canvas.clientHeight;
   if (w === 0 || h === 0) return;
   renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  threeCam.aspect = w / h;
+  threeCam.updateProjectionMatrix();
 }
 
 // ── Fullscreen ────────────────────────────────────────────────
@@ -160,15 +160,19 @@ const xrManager = createXRManager(renderer, {
   onSessionEnd() {
     vrMenu.teardownControllers();
     vrMenu.hide();
-    camera.position.set(0, 0, 0);
-    camera.scale.set(1, 1, 1);
-    camera.zoom = 1;
+    threeCam.position.set(0, 0, 0);
+    threeCam.scale.set(1, 1, 1);
+    threeCam.zoom = 1;
     cameraCtrl.setYawPitch(preVrYaw, preVrPitch);
-    camera.updateMatrixWorld(true);
+    threeCam.updateMatrixWorld(true);
     cameraCtrl.setFov(preVrFov);
     motionLook.disable();
     fullscreenManager.sync();
     onResize();
+    // Canvas layout may not have fully settled synchronously after XR session
+    // end (e.g. if the browser fires fullscreenchange in a subsequent task).
+    // A deferred resize ensures the correct aspect ratio is applied.
+    requestAnimationFrame(onResize);
   },
 });
 
@@ -178,7 +182,7 @@ const xrManager = createXRManager(renderer, {
 renderer.setAnimationLoop(() => {
   cameraCtrl.update();
   vrMenu.update();
-  renderer.render(scene, camera);
+  renderer.render(scene, threeCam);
 });
 
 // ── Init ──────────────────────────────────────────────────────
