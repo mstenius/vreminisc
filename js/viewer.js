@@ -1,7 +1,4 @@
-// vreminisc — A 360 degree equirectangular photo viewer
-// Uses Three.js for WebXR.
-// Place user inside a textured sphere.
-// VR mode hands tracking to the headset, desktop/mobile mode uses drag-to-look and zoom.
+// vreminisc — 360° equirectangular photo viewer (Three.js / WebXR)
 
 import * as THREE from 'three';
 import { createMotionLook } from './motion-look.js';
@@ -39,14 +36,9 @@ renderer.xr.enabled = true;
 // ── Scene ─────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 
-// PerspectiveCamera used for non-VR rendering. In VR mode Three.js
-// internally uses XR tracking cameras instead; this camera's near/far
-// are inherited by them.
-const threeCam = new THREE.PerspectiveCamera(INITIAL_FOV, canvas.clientWidth / canvas.clientHeight, 0.1, 1100);
+const camera = new THREE.PerspectiveCamera(INITIAL_FOV, canvas.clientWidth / canvas.clientHeight, 0.1, 1100);
 
 // ── Photo sphere ──────────────────────────────────────────────
-// Scale X by -1 to flip winding order so the texture renders on the
-// interior surface. Radius 500 — any room-scale VR movement is negligible.
 const sphereGeo = new THREE.SphereGeometry(500, 60, 40);
 sphereGeo.scale(-1, 1, 1);
 
@@ -84,8 +76,8 @@ const uiManager = createUIManager({
 });
 
 // ── Camera controller (pointer / touch / keyboard look + zoom) ─
-const cameraCtrl = createCameraController(canvas, threeCam, {
-  isVRActive: () => renderer.xr.isPresenting,
+const cameraCtrl = createCameraController(canvas, camera, {
+  isVRActive: () => xrManager.isPresenting,
   isMotionActive: () => motionLook.isActive(),
   onInteract: () => uiManager.hideHint(),
 });
@@ -98,7 +90,7 @@ const motionLook = createMotionLook({
   },
   onStatusMessage: uiManager.setStatus,
   onActivate: () => uiManager.hideHint(),
-  isVRActive: () => renderer.xr.isPresenting,
+  isVRActive: () => xrManager.isPresenting(),
 });
 
 // ── Photo loader ──────────────────────────────────────────────
@@ -113,20 +105,20 @@ const photoLoader = createPhotoLoader(sphereMat, {
 
 // ── Resize ────────────────────────────────────────────────────
 function onResize() {
-  if (renderer.xr.isPresenting) return;
+  if (xrManager.isPresenting()) return;
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (w === 0 || h === 0) return;
   renderer.setSize(w, h, false);
-  threeCam.aspect = w / h;
-  threeCam.updateProjectionMatrix();
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
 }
 
 // ── Fullscreen ────────────────────────────────────────────────
 const fullscreenManager = createFullscreenManager({
   fullscreenButton,
   header,
-  isVRActive: () => renderer.xr.isPresenting,
+  isVRActive: () => xrManager.isPresenting(),
   onStatusMessage: uiManager.setStatus,
   onResize,
   onInteract: () => uiManager.hideHint(),
@@ -160,11 +152,11 @@ const xrManager = createXRManager(renderer, {
   onSessionEnd() {
     vrMenu.teardownControllers();
     vrMenu.hide();
-    threeCam.position.set(0, 0, 0);
-    threeCam.scale.set(1, 1, 1);
-    threeCam.zoom = 1;
+    camera.position.set(0, 0, 0);
+    camera.scale.set(1, 1, 1);
+    camera.zoom = 1;
     cameraCtrl.setYawPitch(preVrYaw, preVrPitch);
-    threeCam.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
     cameraCtrl.setFov(preVrFov);
     motionLook.disable();
     fullscreenManager.sync();
@@ -177,12 +169,10 @@ const xrManager = createXRManager(renderer, {
 });
 
 // ── Render loop ───────────────────────────────────────────────
-// setAnimationLoop is XR-compatible: Three.js switches to XR frame
-// delivery automatically when a session is active.
 renderer.setAnimationLoop(() => {
   cameraCtrl.update();
   vrMenu.update();
-  renderer.render(scene, threeCam);
+  renderer.render(scene, camera);
 });
 
 // ── Init ──────────────────────────────────────────────────────
