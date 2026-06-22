@@ -148,8 +148,9 @@ export function createCameraController(canvas, threeCam, { isVRActive, isMotionA
     const dy = e.clientY - prevY;
     prevX = e.clientX;
     prevY = e.clientY;
-    yaw   += dx * DRAG_SPEED;
-    pitch += dy * DRAG_SPEED;
+    const fovScale = threeCam.fov / MAX_FOV;
+    yaw   += dx * DRAG_SPEED * fovScale;
+    pitch += dy * DRAG_SPEED * fovScale;
     pitch = clamp(pitch, -HALF_PI, HALF_PI);
     applyRotation();
   }
