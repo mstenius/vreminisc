@@ -77,7 +77,7 @@ const uiManager = createUIManager({
 
 // ── Camera controller (pointer / touch / keyboard look + zoom) ─
 const cameraCtrl = createCameraController(canvas, camera, {
-  isVRActive: () => xrManager.isPresenting,
+  isVRActive: () => xrManager.isPresenting(),
   isMotionActive: () => motionLook.isActive(),
   onInteract: () => uiManager.hideHint(),
 });
