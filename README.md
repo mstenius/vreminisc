@@ -81,9 +81,10 @@ configuration.
 index.html
 css/style.css
 js/
-  viewer.js                   — scene, XR session, photo loading
+  viewer.js                    — scene, XR session, photo loading
+  ... 
   vendor/three/three.module.js — Three.js r170 (vendored)
-media/textures/               — equirectangular photos
+media/textures/                — equirectangular photos
   photos.json
   photo1.jpg
   ...
